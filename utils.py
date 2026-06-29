@@ -2,7 +2,8 @@ import cv2
 import os
 import numpy as np
 import torch
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 # -*- coding: utf-8 -*-
 """
@@ -11,9 +12,9 @@ Created on Tue Dec 19 11:08:19 2023
 @author: Administrator
 """
 
-from sklearn.metrics import accuracy_score  
-from sklearn.metrics import precision_score  
-from sklearn.metrics import recall_score 
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import precision_score
+from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import cohen_kappa_score
 
@@ -24,9 +25,8 @@ import os
 import shutil
 
 
-
 def load_data_evaluate(dir_path, dataset_type, n_sub, mode_evaluate="LOSO"):
-    '''
+    """
     Load the Corresponding Dataset Based on the Evaluation Mode
 
     Parameters
@@ -38,22 +38,22 @@ def load_data_evaluate(dir_path, dataset_type, n_sub, mode_evaluate="LOSO"):
     n_sub : int
         The number of subject, the scope range from 1 to 9.
     mode_evaluate : str, optional
-        The mode of evaluation. The default is "LOSO" for cross-subject classification. Other value represents subject-specific classification. 
+        The mode of evaluation. The default is "LOSO" for cross-subject classification. Other value represents subject-specific classification.
 
     Returns
     -------
     TYPE
         DESCRIPTION.
 
-    '''
-    if mode_evaluate=="LOSO":
+    """
+    if mode_evaluate == "LOSO":
         return load_data_LOSO(dir_path, dataset_type, n_sub)
     else:
         return load_data_subject_dependent(dir_path, dataset_type, n_sub)
 
 
 def load_data_subject_dependent(dir_path, dataset_type, n_sub):
-    '''
+    """
     Load data for subject-specific classification
 
     Parameters
@@ -65,22 +65,22 @@ def load_data_subject_dependent(dir_path, dataset_type, n_sub):
     n_sub : int
         The number of subject, the scope range from 1 to 9.
 
-    '''
-    train_data, train_label = load_data(dir_path, dataset_type, n_sub, mode='train')
-    test_data, test_label = load_data(dir_path, dataset_type, n_sub, mode='test')
+    """
+    train_data, train_label = load_data(dir_path, dataset_type, n_sub, mode="train")
+    test_data, test_label = load_data(dir_path, dataset_type, n_sub, mode="test")
     return train_data, train_label, test_data, test_label
 
 
-def load_data_LOSO(dir_path, dataset_type, subject): 
-    """ Loading and Dividing of the data set based on the 
-    'Leave One Subject Out' (LOSO) evaluation approach. 
+def load_data_LOSO(dir_path, dataset_type, subject):
+    """Loading and Dividing of the data set based on the
+    'Leave One Subject Out' (LOSO) evaluation approach.
     LOSO is used for  Subject-independent evaluation.
-    In LOSO, the model is trained and evaluated by several folds, equal to the 
+    In LOSO, the model is trained and evaluated by several folds, equal to the
     number of subjects, and for each fold, one subject is used for evaluation
-    and the others for training. The LOSO evaluation technique ensures that 
-    separate subjects (not visible in the training data) are usedto evaluate 
-    the model. 
-   
+    and the others for training. The LOSO evaluation technique ensures that
+    separate subjects (not visible in the training data) are usedto evaluate
+    the model.
+
         Parameters
         ----------
         dir_path: string
@@ -92,16 +92,15 @@ def load_data_LOSO(dir_path, dataset_type, subject):
             Here, the subject data is used  test the model and other subjects data
             for training
     """
-    
+
     X_train, y_train = np.empty([0, 3]), np.empty([0, 3])
-    for n_sub in range (1, 10):
-        
-        X1, y1 = load_data(dir_path, dataset_type, n_sub, mode='train')
-        X2, y2 = load_data(dir_path, dataset_type, n_sub, mode='test')
+    for n_sub in range(1, 10):
+        X1, y1 = load_data(dir_path, dataset_type, n_sub, mode="train")
+        X2, y2 = load_data(dir_path, dataset_type, n_sub, mode="test")
         X = np.concatenate((X1, X2), axis=0)
         y = np.concatenate((y1, y2), axis=0)
-                   
-        if (n_sub == subject):
+
+        if n_sub == subject:
             X_test = X
             y_test = y
         elif X_train.shape[0] == 0:
@@ -114,8 +113,8 @@ def load_data_LOSO(dir_path, dataset_type, subject):
     return X_train, y_train, X_test, y_test
 
 
-def load_data(dir_path, dataset_type, n_sub, mode='train'):
-    '''
+def load_data(dir_path, dataset_type, n_sub, mode="train"):
+    """
     加载mat格式的数据返回data和label的ndarray
 
     Parameters
@@ -135,20 +134,21 @@ def load_data(dir_path, dataset_type, n_sub, mode='train'):
         train or test dataset
     label : ndarray
 
-    '''
-    if mode=='train':
-        mode_s = 'T'
+    """
+    if mode == "train":
+        mode_s = "T"
     else:
-        mode_s = 'E'
-    data_mat = scipy.io.loadmat(dir_path + '{}{:02d}{}.mat'.format(dataset_type, n_sub, mode_s))
-    data = data_mat['data']  # (288, 22, 1000)
-    label =data_mat['label']
+        mode_s = "E"
+    data_mat = scipy.io.loadmat(
+        dir_path + "{}{:02d}{}.mat".format(dataset_type, n_sub, mode_s)
+    )
+    data = data_mat["data"]  # (288, 22, 1000)
+    label = data_mat["label"]
     return data, label
 
 
-
 def calMetrics(y_true, y_pred):
-    '''
+    """
     calcuate the metrics: accuracy, precison, recall, f1, kappa
 
     Parameters
@@ -171,24 +171,23 @@ def calMetrics(y_true, y_pred):
     kappa : float
         kappa value.
 
-    '''
+    """
     number = max(y_true)
     if number == 2:
-        mode = 'binary'
+        mode = "binary"
     else:
-        mode = 'macro'
-    
+        mode = "macro"
+
     accuracy = accuracy_score(y_true, y_pred)
     precison = precision_score(y_true, y_pred, average=mode)
     recall = recall_score(y_true, y_pred, average=mode)
     f1 = f1_score(y_true, y_pred, average=mode)
     kappa = cohen_kappa_score(y_true, y_pred)
     return accuracy, precison, recall, f1, kappa
-    
 
 
-def calculatePerClass(data_dict, metric_name='Precision'):
-    '''
+def calculatePerClass(data_dict, metric_name="Precision"):
+    """
     Calculate the performance metrics for each category
 
     Parameters
@@ -203,49 +202,47 @@ def calculatePerClass(data_dict, metric_name='Precision'):
     df: DataFrame
         Calculation results of the specified metrics for all categories across all subjects
 
-    '''
+    """
     metric_dict = {}
     for key in data_dict.keys():
         df = data_dict[key]
-        if metric_name == 'Precision':
-            metric_dict[key] = precision_score(df['true'], df['pred'], average=None)
-        elif metric_name == 'Recall':
-            metric_dict[key] = recall_score(df['true'], df['pred'], average=None)
+        if metric_name == "Precision":
+            metric_dict[key] = precision_score(df["true"], df["pred"], average=None)
+        elif metric_name == "Recall":
+            metric_dict[key] = recall_score(df["true"], df["pred"], average=None)
     df = pd.DataFrame(metric_dict)
-    df = df*100
+    df = df * 100
     df = df.applymap(lambda x: round(x, 2))
-    mean = df.apply('mean', axis=1).round(2) 
-    std  = df.apply('std', axis=1).round(2) 
-    df['mean'] = mean
-    df['std'] = std
-    df['metrics'] = metric_name
-    
+    mean = df.apply("mean", axis=1).round(2)
+    std = df.apply("std", axis=1).round(2)
+    df["mean"] = mean
+    df["std"] = std
+    df["metrics"] = metric_name
+
     return df
 
 
-
 def numberClassChannel(database_type):
-    if database_type=='A':
+    if database_type == "A":
         number_class = 4
         number_channel = 22
-    elif database_type=='B':
+    elif database_type == "B":
         number_class = 2
         number_channel = 3
-#    elif database_type=='C':
-#        number_class = 4
-#        number_channel = 128
+    #    elif database_type=='C':
+    #        number_class = 4
+    #        number_channel = 128
     return number_class, number_channel
 
 
-
-
 #
-#The following code is derived from this open-source code：https://github.com/eeyhsong/EEG-Conformer/blob/main/visualization/utils.py
+# The following code is derived from this open-source code：https://github.com/eeyhsong/EEG-Conformer/blob/main/visualization/utils.py
 #
+
 
 class ActivationsAndGradients:
-    """ Class for extracting activations and
-    registering gradients from targeted intermediate layers """
+    """Class for extracting activations and
+    registering gradients from targeted intermediate layers"""
 
     def __init__(self, model, target_layers, reshape_transform):
         self.model = model
@@ -255,17 +252,17 @@ class ActivationsAndGradients:
         self.handles = []
         for target_layer in target_layers:
             self.handles.append(
-                target_layer.register_forward_hook(
-                    self.save_activation))
+                target_layer.register_forward_hook(self.save_activation)
+            )
             # Backward compatibility with older pytorch versions:
-            if hasattr(target_layer, 'register_full_backward_hook'):
+            if hasattr(target_layer, "register_full_backward_hook"):
                 self.handles.append(
-                    target_layer.register_full_backward_hook(
-                        self.save_gradient))
+                    target_layer.register_full_backward_hook(self.save_gradient)
+                )
             else:
                 self.handles.append(
-                    target_layer.register_backward_hook(
-                        self.save_gradient))
+                    target_layer.register_backward_hook(self.save_gradient)
+                )
 
     def save_activation(self, module, input, output):
         activation = output
@@ -291,11 +288,7 @@ class ActivationsAndGradients:
 
 
 class GradCAM:
-    def __init__(self,
-                 model,
-                 target_layers,
-                 reshape_transform=None,
-                 use_cuda=False):
+    def __init__(self, model, target_layers, reshape_transform=None, use_cuda=False):
         self.model = model.eval()
         self.target_layers = target_layers
         self.reshape_transform = reshape_transform
@@ -303,7 +296,8 @@ class GradCAM:
         if self.cuda:
             self.model = model.cuda()
         self.activations_and_grads = ActivationsAndGradients(
-            self.model, target_layers, reshape_transform)
+            self.model, target_layers, reshape_transform
+        )
 
     """ Get a vector of weights for every channel in the target layer.
         Methods that return weights channels,
@@ -333,10 +327,12 @@ class GradCAM:
         return width, height
 
     def compute_cam_per_layer(self, input_tensor):
-        activations_list = [a.cpu().data.numpy()
-                            for a in self.activations_and_grads.activations]
-        grads_list = [g.cpu().data.numpy()
-                      for g in self.activations_and_grads.gradients]
+        activations_list = [
+            a.cpu().data.numpy() for a in self.activations_and_grads.activations
+        ]
+        grads_list = [
+            g.cpu().data.numpy() for g in self.activations_and_grads.gradients
+        ]
         target_size = self.get_target_width_height(input_tensor)
 
         cam_per_target_layer = []
@@ -344,7 +340,9 @@ class GradCAM:
 
         for layer_activations, layer_grads in zip(activations_list, grads_list):
             cam = self.get_cam_image(layer_activations, layer_grads)
-            cam[cam < 0] = 0  # works like mute the min-max scale in the function of scale_cam_image
+            cam[cam < 0] = (
+                0  # works like mute the min-max scale in the function of scale_cam_image
+            )
             scaled = self.scale_cam_image(cam, target_size)
             cam_per_target_layer.append(scaled[:, None, :])
 
@@ -380,15 +378,15 @@ class GradCAM:
             target_category = [target_category] * input_tensor.size(0)
 
         if target_category is None:
-            output=output[1]
+            output = output[1]
             target_category = np.argmax(output.cpu().data.numpy(), axis=-1)
             print(f"category id: {target_category}")
         else:
-            assert (len(target_category) == input_tensor.size(0))
+            assert len(target_category) == input_tensor.size(0)
 
         self.model.zero_grad()
         loss = self.get_loss(output, target_category)
-        print('the loss is', loss)
+        print("the loss is", loss)
         loss.backward(retain_graph=True)
         # loss.backward(torch.ones_like(output), retain_graph=True)
 
@@ -415,15 +413,18 @@ class GradCAM:
         if isinstance(exc_value, IndexError):
             # Handle IndexError here...
             print(
-                f"An exception occurred in CAM with block: {exc_type}. Message: {exc_value}")
+                f"An exception occurred in CAM with block: {exc_type}. Message: {exc_value}"
+            )
             return True
 
 
-def show_cam_on_image(img: np.ndarray,
-                      mask: np.ndarray,
-                      use_rgb: bool = False,
-                      colormap: int = cv2.COLORMAP_JET) -> np.ndarray:
-    """ This function overlays the cam mask on the image as an heatmap.
+def show_cam_on_image(
+    img: np.ndarray,
+    mask: np.ndarray,
+    use_rgb: bool = False,
+    colormap: int = cv2.COLORMAP_JET,
+) -> np.ndarray:
+    """This function overlays the cam mask on the image as an heatmap.
     By default the heatmap is in BGR format.
 
     :param img: The base image in RGB or BGR format.
@@ -439,8 +440,7 @@ def show_cam_on_image(img: np.ndarray,
     heatmap = np.float32(heatmap) / 255
 
     if np.max(img) > 1:
-        raise Exception(
-            "The input image should np.float32 in the range [0, 1]")
+        raise Exception("The input image should np.float32 in the range [0, 1]")
 
     cam = heatmap  # + img
     cam = cam / np.max(cam)
@@ -466,9 +466,9 @@ def center_crop_img(img: np.ndarray, size: int):
 
     if new_w == size:
         h = (new_h - size) // 2
-        img = img[h: h+size]
+        img = img[h : h + size]
     else:
         w = (new_w - size) // 2
-        img = img[:, w: w+size]
+        img = img[:, w : w + size]
 
     return img

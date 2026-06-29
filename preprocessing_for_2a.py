@@ -8,24 +8,36 @@
 #    ensuring they correspond with epochs and their numbers match.
 # 4. Save the resulting data in a new mat file,
 #    preparing it for use in the subsequent main.py.
+# 每个数据集都放在 data 目录下，可以有 BCICIV_2a文件夹，目录结构如下：
+# data/
+# ├── BCICIV_2a/         # 存放数据集的目录
+# │   ├── BCICIV_2a_gdf/
+# │   ├── true_labels/
+# │
+# ├── BCICIV_2a_mat_raw/ # 存放处理后的mat文件
+
+
 """
 
 import mne
 import numpy as np
 import scipy.signal as signal
 from scipy.io import savemat
+import argparse
 import scipy.io as sio
-import numpy as np
+import os
 
 
-def changeGdf2Mat(dir_path, mode="train"):
+def changeGdf2Mat(dir_path, out_dir, mode="train"):
     """
     read data from GDF files and store as mat files
 
     Parameters
     ----------
     dir_path : str
-        GDF file dir path.
+        GDF file dir path, 这个目录下放了BCICIV_2a_gdf文件夹和true_labels文件夹.
+    out_dir : str
+        output directory, 这个目录下会放生成的mat文件.
     mode : str, optional
         change train dataset or eval dataset. The default is "train".
 
@@ -41,8 +53,10 @@ def changeGdf2Mat(dir_path, mode="train"):
         mode_str = "E"
     for nSub in range(1, 10):
         # Load the gdf file
-        data_filename = dir_path + "BCICIV_2a_gdf/A0{}{}.gdf".format(nSub, mode_str)
-        raw = mne.io.read_raw_gdf(data_filename)
+        data_file_path = os.path.join(
+            dir_path, "BCICIV_2a_gdf", f"A0{nSub}{mode_str}.gdf"
+        )
+        raw = mne.io.read_raw_gdf(data_file_path)
 
         # Select the events of interest
         events, event_dict = mne.events_from_annotations(raw)
@@ -80,17 +94,40 @@ def changeGdf2Mat(dir_path, mode="train"):
         )
 
         filtered_data = epochs.get_data()
-        label_filename = dir_path + "true_labels/" + "A0{}{}.mat".format(nSub, mode_str)
-        mat = sio.loadmat(label_filename)  # load target mat file
+        label_file_path = os.path.join(
+            dir_path, "true_labels", f"A0{nSub}{mode_str}.mat"
+        )
+        mat = sio.loadmat(label_file_path)  # load target mat file
         labels = mat["classlabel"]
 
         # Save the data and labels to a .mat file
-        result_filename = "mymat_raw/A0{}{}.mat".format(nSub, mode_str)
-        savemat(result_filename, {"data": filtered_data, "label": labels})
+        result_file_path = os.path.join(out_dir, f"A0{nSub}{mode_str}.mat")
+        savemat(result_file_path, {"data": filtered_data, "label": labels})
 
 
-dir_path = "./"
-# prepare train dataset
-changeGdf2Mat(dir_path, "train")
-# prepare test dataset
-changeGdf2Mat(dir_path, "eval")
+def main():
+    parser = argparse.ArgumentParser(
+        description="Preprocess GDF files to mat files.",
+        usage="python preprocessing_for_2a.py --dir_path ./data/BCICIV_2a --out_dir ./data/BCICIV_2a_mat_raw",
+    )
+    parser.add_argument(
+        "--dir_path", type=str, default="./data/BCICIV_2a", help="GDF file dir path."
+    )
+    parser.add_argument(
+        "--out_dir",
+        type=str,
+        default="./data/BCICIV_2a_mat_raw",
+        help="output directory.",
+    )
+    args = parser.parse_args()
+    if not os.path.exists(args.out_dir):
+        os.makedirs(args.out_dir)
+        print(f"create directory {args.out_dir}")
+    # prepare train dataset
+    changeGdf2Mat(args.dir_path, args.out_dir, "train")
+    # prepare test dataset
+    changeGdf2Mat(args.dir_path, args.out_dir, "eval")
+
+
+if __name__ == "__main__":
+    main()

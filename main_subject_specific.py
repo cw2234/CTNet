@@ -19,6 +19,7 @@ from pandas import ExcelWriter
 import torch
 import torch.nn as nn
 from torchsummary import summary
+from sklearn.model_selection import train_test_split
 
 from utils import calMetrics
 from utils import calculatePerClass
@@ -41,7 +42,7 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-class ExP:
+class Experiment:
     def __init__(
         self,
         nsub,
@@ -67,7 +68,6 @@ class ExP:
         batch_size=72,  # each batch of raw train dataset, real training batchsize =  batch_size * (1 + N_AUG) for additional data augmentation.
     ):
 
-        super(ExP, self).__init__()
         self.dataset_type = dataset_type
         self.batch_size = batch_size
         self.lr = learning_rate
@@ -116,7 +116,6 @@ class ExP:
         for clsAug in range(self.number_class):
             cls_idx = np.where(label == clsAug)
             tmp_data = timg[cls_idx]
-            tmp_label = label[cls_idx]
 
             tmp_aug_data = np.zeros(
                 (number_records_by_augmentation, 1, self.number_channel, 1000),
@@ -140,7 +139,9 @@ class ExP:
                     ]
 
             aug_data.append(tmp_aug_data)
-            aug_label.append(tmp_label[:number_records_by_augmentation])
+            aug_label.append(
+                np.full(number_records_by_augmentation, clsAug, dtype=label.dtype)
+            )
         aug_data = np.concatenate(aug_data)
         aug_label = np.concatenate(aug_label)
         aug_shuffle = np.random.permutation(len(aug_data))
@@ -151,114 +152,134 @@ class ExP:
         aug_label = torch.from_numpy(aug_label)
         return aug_data, aug_label
 
-    def get_source_data(self):
+    def prepare_train_val_test_data(self):
+        """
+        准备训练集、验证集和测试集，将数据z-score，用训练集的均值和标准差进行归一化
+        """
         (
-            train_data,  # (batch, channel, length)
-            train_label,
+            all_data,  # (batch, channel, length)
+            all_label,
             test_data,
             test_label,
         ) = load_data_evaluate(
             self.root, self.dataset_type, self.nSub, mode_evaluate=self.evaluate_mode
         )
 
-        train_data = np.expand_dims(train_data, axis=1)  # (288, 1, 22, 1000)
-        train_label = np.transpose(train_label)
+        all_data = np.expand_dims(all_data, axis=1)  # (288, 1, 22, 1000)
+        all_label = np.transpose(all_label)
+        all_label = all_label[0]
 
-        allData = train_data
-        allLabel = train_label[0]
+        test_data = np.expand_dims(test_data, axis=1)
+        test_label = np.transpose(test_label)
+        test_label = test_label[0]
 
-        shuffle_num = np.random.permutation(len(allData))
-        allData = allData[shuffle_num, :, :, :]  # (288, 1, 22, 1000)
-        allLabel = allLabel[shuffle_num]
+        # 划分训练集和验证集
+        train_data, val_data, train_label, val_label = train_test_split(
+            all_data,
+            all_label,
+            test_size=self.validate_ratio,
+            shuffle=True,
+            stratify=all_label,
+        )
+        print("-" * 20)
 
         print(
-            "-" * 20,
             "train size：",
             train_data.shape,
+            "val size：",
+            val_data.shape,
             "test size：",
             test_data.shape,
         )
 
-        test_data = np.expand_dims(test_data, axis=1)
-        test_label = np.transpose(test_label)
-
-        testData = test_data
-        testLabel = test_label[0]
-
         # standardize
-        target_mean = np.mean(allData)
-        target_std = np.std(allData)
-        allData = (allData - target_mean) / target_std
-        testData = (testData - target_mean) / target_std
+        target_mean = np.mean(train_data)
+        target_std = np.std(train_data)
+
+        train_data = (train_data - target_mean) / target_std
+        val_data = (val_data - target_mean) / target_std
+        test_data = (test_data - target_mean) / target_std
 
         isSaveDataLabel = False  # True
         if isSaveDataLabel:
-            np.save("./gradm_data/train_data_{}.npy".format(self.nSub), allData)
-            np.save("./gradm_data/train_lable_{}.npy".format(self.nSub), allLabel)
-            np.save("./gradm_data/test_data_{}.npy".format(self.nSub), testData)
-            np.save("./gradm_data/test_label_{}.npy".format(self.nSub), testLabel)
+            np.save("./gradm_data/train_data_{}.npy".format(self.nSub), train_data)
+            np.save("./gradm_data/train_lable_{}.npy".format(self.nSub), train_label)
+            np.save("./gradm_data/val_data_{}.npy".format(self.nSub), val_data)
+            np.save("./gradm_data/val_lable_{}.npy".format(self.nSub), val_label)
+            np.save("./gradm_data/test_data_{}.npy".format(self.nSub), test_data)
+            np.save("./gradm_data/test_label_{}.npy".format(self.nSub), test_label)
 
         # data shape: (trial, conv channel, electrode channel, time samples)
-        allData = allData.astype(np.float32)
-        testData = testData.astype(np.float32)
-        allLabel = allLabel.astype(np.int64)
-        allLabel = allLabel - 1
-        testLabel = testLabel.astype(np.int64)
-        testLabel = testLabel - 1
+        train_data = train_data.astype(np.float32)
+        test_data = test_data.astype(np.float32)
+        val_data = val_data.astype(np.float32)
+        train_label = train_label.astype(np.int64)
+        train_label = train_label - 1
+        val_label = val_label.astype(np.int64)
+        val_label = val_label - 1
+        test_label = test_label.astype(np.int64)
+        test_label = test_label - 1
 
-        return allData, allLabel, testData, testLabel
+        return train_data, train_label, val_data, val_label, test_data, test_label
+
+    def prepare_dataloader(self, data: np.ndarray, label: np.ndarray, shuffle):
+        dataset = torch.utils.data.TensorDataset(
+            torch.from_numpy(data), torch.from_numpy(label)
+        )
+        dataloader = torch.utils.data.DataLoader(
+            dataset=dataset, batch_size=self.batch_size, shuffle=shuffle
+        )
+        return dataloader
 
     def start_train(self):
-        allData, allLabel, test_data, test_label = self.get_source_data()
+        (
+            train_data_np,
+            train_label_np,
+            val_data_np,
+            val_label_np,
+            test_data_np,
+            test_label_np,
+        ) = self.prepare_train_val_test_data()
         # print("label size:", label.shape)
         # print("label size:", label)
 
-        X_train = torch.from_numpy(allData)
-        y_train = torch.from_numpy(allLabel)
-        dataset = torch.utils.data.TensorDataset(X_train, y_train)
+        train_dataloader = self.prepare_dataloader(
+            train_data_np, train_label_np, shuffle=True
+        )
 
-        test_data = torch.from_numpy(test_data)
-        test_label = torch.from_numpy(test_label)
-        test_dataset = torch.utils.data.TensorDataset(test_data, test_label)
-        test_dataloader = torch.utils.data.DataLoader(
-            dataset=test_dataset, batch_size=self.batch_size, shuffle=False
+        val_dataloader = self.prepare_dataloader(
+            val_data_np, val_label_np, shuffle=False
+        )
+
+        test_dataloader = self.prepare_dataloader(
+            test_data_np, test_label_np, shuffle=False
         )
 
         # Optimizers
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
         )
 
         best_epoch = 0
-        min_loss = 100
+        min_loss = 1000
         # recording train_acc, train_loss, test_acc, test_loss
         result_process = []
         # Train the cnn model
         for epoch in range(self.n_epochs):
-            train_dataloader = torch.utils.data.DataLoader(
-                dataset=dataset, batch_size=self.batch_size, shuffle=True
-            )
             epoch_process = {}
             epoch_process["epoch"] = epoch
             # in_epoch = time.time()
             self.model.train()
 
             # train model
-            train_acc, train_loss, val_data_list, val_label_list = self.train_epoch(
-                train_dataloader, allData, allLabel
+            train_acc, train_loss = self.train_epoch(
+                train_dataloader, train_data_np, train_label_np
             )
             epoch_process["train_acc"] = train_acc
             epoch_process["train_loss"] = train_loss
 
-            val_data = torch.cat(val_data_list)
-            val_label = torch.cat(val_label_list)
-
-            val_dataset = torch.utils.data.TensorDataset(val_data, val_label)
-            val_dataloader = torch.utils.data.DataLoader(
-                dataset=val_dataset, batch_size=self.batch_size, shuffle=False
-            )
             # validate model
-            val_acc, val_loss = self.validate(val_dataloader)
+            val_acc, val_loss = self.validate_epoch(val_dataloader)
 
             epoch_process["val_acc"] = val_acc
             epoch_process["val_loss"] = val_loss
@@ -281,33 +302,24 @@ class ExP:
 
         df_process = pd.DataFrame(result_process)
 
-        return test_acc, test_label, y_pred, df_process, best_epoch
+        return test_acc, torch.from_numpy(test_label_np), y_pred, df_process, best_epoch
         # writer.close()
 
-    def train_epoch(self, train_dataloader, allData, allLabel):
+    def train_epoch(self, train_dataloader, train_data_np, train_label_np):
         """训练模型，每个epoch的"""
         # in_epoch = time.time()
         self.model.train()
 
-        # 验证集
-        val_data_list = []
-        val_label_list = []
         correct = 0
         total = 0
         train_loss = 0
         for i, (batch_x, batch_y) in enumerate(train_dataloader):
-            number_sample = batch_x.shape[0]
-            number_validate = int(self.validate_ratio * number_sample)
-
             # split raw train dataset into real train dataset and validate dataset
-            train_data = batch_x[:-number_validate]
-            train_label = batch_y[:-number_validate]
-
-            val_data_list.append(batch_x[-number_validate:])  # correct 20250417
-            val_label_list.append(batch_y[-number_validate:])  # correct 20250417
+            train_data = batch_x
+            train_label = batch_y
 
             # data augmentation
-            aug_data, aug_label = self.interaug(allData, allLabel)
+            aug_data, aug_label = self.interaug(train_data_np, train_label_np)
             # concat real train dataset and generate aritifical train dataset
             train_data = torch.cat((train_data, aug_data))
             train_label = torch.cat((train_label, aug_label))
@@ -332,10 +344,10 @@ class ExP:
         train_acc = correct / total
         train_loss = train_loss / total
 
-        return train_acc, train_loss, val_data_list, val_label_list
+        return train_acc, train_loss
 
-    def validate(self, val_dataloader):
-        """验证模型"""
+    def validate_epoch(self, val_dataloader):
+        """验证模型，每个epoch的验证集准确率和损失"""
 
         self.model.eval()
 
@@ -365,8 +377,8 @@ class ExP:
     def evaluate(self, test_dataloader):
         """测试模型"""
         # load model for test
-        self.model.eval()
         self.model = torch.load(self.model_filename, weights_only=False).to(device)
+        self.model.eval()
 
         correct = 0
         total = 0
@@ -429,7 +441,7 @@ def main(
         set_seed(seed_n)
         index_round = 0
         print("Subject %d" % (i + 1))
-        exp = ExP(
+        exp = Experiment(
             i + 1,
             DATA_DIR,
             dirs,

@@ -85,8 +85,6 @@ class Experiment:
         self.evaluate_mode = evaluate_mode
         self.validate_ratio = validate_ratio
 
-        self.criterion_cls = nn.CrossEntropyLoss()
-
         self.number_class, self.number_channel = numberClassChannel(self.dataset_type)
         self.model = EEGTransformer(
             heads=self.heads,
@@ -109,13 +107,15 @@ class Experiment:
     def interaug(self, timg, label):
         aug_data = []
         aug_label = []
-        number_records_by_augmentation = self.number_augmentation * int(
-            self.batch_size / self.number_class
-        )
+
         number_segmentation_points = 1000 // self.number_seg
         for clsAug in range(self.number_class):
             cls_idx = np.where(label == clsAug)
             tmp_data = timg[cls_idx]
+            # 对每个类进行数据增强
+            number_records_by_augmentation = (
+                self.number_augmentation * tmp_data.shape[0]
+            )
 
             tmp_aug_data = np.zeros(
                 (number_records_by_augmentation, 1, self.number_channel, 1000),
@@ -144,12 +144,7 @@ class Experiment:
             )
         aug_data = np.concatenate(aug_data)
         aug_label = np.concatenate(aug_label)
-        aug_shuffle = np.random.permutation(len(aug_data))
-        aug_data = aug_data[aug_shuffle, :, :]
-        aug_label = aug_label[aug_shuffle]
 
-        aug_data = torch.from_numpy(aug_data)
-        aug_label = torch.from_numpy(aug_label)
         return aug_data, aug_label
 
     def prepare_train_val_test_data(self):
@@ -168,10 +163,12 @@ class Experiment:
         all_data = np.expand_dims(all_data, axis=1)  # (288, 1, 22, 1000)
         all_label = np.transpose(all_label)
         all_label = all_label[0]
+        all_label = all_label - 1
 
         test_data = np.expand_dims(test_data, axis=1)
         test_label = np.transpose(test_label)
         test_label = test_label[0]
+        test_label = test_label - 1
 
         # 划分训练集和验证集
         train_data, val_data, train_label, val_label = train_test_split(
@@ -191,7 +188,19 @@ class Experiment:
             "test size：",
             test_data.shape,
         )
-
+        # 对训练集进行数据增强
+        aug_data, aug_label = self.interaug(train_data, train_label)
+        train_data = np.concatenate((train_data, aug_data), axis=0)
+        train_label = np.concatenate((train_label, aug_label), axis=0)
+        print("aug size：", aug_data.shape, "aug label size：", aug_label.shape)
+        print(
+            "train size：",
+            train_data.shape,
+            "val size：",
+            val_data.shape,
+            "test size：",
+            test_data.shape,
+        )
         # standardize
         target_mean = np.mean(train_data)
         target_std = np.std(train_data)
@@ -214,11 +223,8 @@ class Experiment:
         test_data = test_data.astype(np.float32)
         val_data = val_data.astype(np.float32)
         train_label = train_label.astype(np.int64)
-        train_label = train_label - 1
         val_label = val_label.astype(np.int64)
-        val_label = val_label - 1
         test_label = test_label.astype(np.int64)
-        test_label = test_label - 1
 
         return train_data, train_label, val_data, val_label, test_data, test_label
 
@@ -255,8 +261,10 @@ class Experiment:
             test_data_np, test_label_np, shuffle=False
         )
 
+        # Loss function
+        criterion = nn.CrossEntropyLoss()
         # Optimizers
-        self.optimizer = torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(self.b1, self.b2)
         )
 
@@ -273,115 +281,98 @@ class Experiment:
 
             # train model
             train_acc, train_loss = self.train_epoch(
-                train_dataloader, train_data_np, train_label_np
+                self.model, train_dataloader, criterion, optimizer
             )
             epoch_process["train_acc"] = train_acc
             epoch_process["train_loss"] = train_loss
 
             # validate model
-            val_acc, val_loss = self.validate_epoch(val_dataloader)
+            val_acc, val_loss, _, _ = self.evaluate(
+                self.model, val_dataloader, criterion
+            )
 
             epoch_process["val_acc"] = val_acc
             epoch_process["val_loss"] = val_loss
 
-            # if min_loss>val_loss:
             if min_loss > val_loss:
                 min_loss = val_loss
                 best_epoch = epoch
                 epoch_process["epoch"] = epoch
                 torch.save(self.model, self.model_filename)
+
+                test_acc, test_loss, _, _ = self.evaluate(
+                    self.model, test_dataloader, criterion
+                )
+                epoch_process["test_acc"] = test_acc
+                epoch_process["test_loss"] = test_loss
                 print(
                     f"{self.nSub}_{epoch_process['epoch']} train_acc: {epoch_process['train_acc']:.4f} train_loss: {epoch_process['train_loss']:.6f}\tval_acc: {epoch_process['val_acc']:.6f} val_loss: {epoch_process['val_loss']:.7f}"
+                    f"\ttest_acc: {epoch_process['test_acc']:.4f} test_loss: {epoch_process['test_loss']:.7f}"
                 )
 
             result_process.append(epoch_process)
 
         # test model
-        test_acc, y_pred = self.evaluate(test_dataloader)
+        self.model = torch.load(self.model_filename, weights_only=False).to(device)
+        test_acc, test_loss, y_true_list, y_pred_list = self.evaluate(
+            self.model, test_dataloader, criterion
+        )
         print("epoch: ", best_epoch, "\tThe test accuracy is:", test_acc)
 
         df_process = pd.DataFrame(result_process)
 
-        return test_acc, torch.from_numpy(test_label_np), y_pred, df_process, best_epoch
+        return test_acc, y_true_list, y_pred_list, df_process, best_epoch
         # writer.close()
 
-    def train_epoch(self, train_dataloader, train_data_np, train_label_np):
+    def train_epoch(self, model, train_dataloader, criterion, optimizer):
         """训练模型，每个epoch的"""
         # in_epoch = time.time()
-        self.model.train()
+        model.train()
 
         correct = 0
         total = 0
         train_loss = 0
         for i, (batch_x, batch_y) in enumerate(train_dataloader):
             # split raw train dataset into real train dataset and validate dataset
-            train_data = batch_x
-            train_label = batch_y
-
-            # data augmentation
-            aug_data, aug_label = self.interaug(train_data_np, train_label_np)
-            # concat real train dataset and generate aritifical train dataset
-            train_data = torch.cat((train_data, aug_data))
-            train_label = torch.cat((train_label, aug_label))
-            train_data = train_data.to(device)
-            train_label = train_label.to(device)
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
 
             # training model
-            features, outputs = self.model(train_data)
+            features, outputs = model(batch_x)
 
-            loss = self.criterion_cls(outputs, train_label)
+            loss = criterion(outputs, batch_y)
 
-            self.optimizer.zero_grad()
+            optimizer.zero_grad()
             loss.backward()
-            self.optimizer.step()
+            optimizer.step()
 
             # 记录train acc, train loss
-            train_loss += loss.item() * train_label.size(0)
+            train_loss += loss.item() * batch_y.size(0)
             _, train_pred = torch.max(outputs, 1)
-            correct += (train_pred == train_label).sum().item()
-            total += train_label.size(0)
+            correct += (train_pred == batch_y).sum().item()
+            total += batch_y.size(0)
 
         train_acc = correct / total
         train_loss = train_loss / total
 
         return train_acc, train_loss
 
-    def validate_epoch(self, val_dataloader):
-        """验证模型，每个epoch的验证集准确率和损失"""
+    def evaluate(self, model, test_dataloader, criterion):
+        """测试模型
 
-        self.model.eval()
+        Returns:
+            (test_acc, test_loss, y_true_list, y_pred_list)
+            test_acc: 测试准确率
+            test_loss: 测试损失
+            y_true_list: 真实标签
+            y_pred_list: 预测标签
+        """
 
-        outputs_list = []
+        model.eval()
         correct = 0
         total = 0
-        val_loss = 0
-        with torch.no_grad():
-            for i, (batch_x, batch_y) in enumerate(val_dataloader):
-                # val model
-                batch_x = batch_x.to(device)
-                batch_y = batch_y.to(device)
-
-                _, logits = self.model(batch_x)
-
-                val_loss += self.criterion_cls(logits, batch_y).item() * batch_y.size(0)
-
-                _, val_pred = torch.max(logits, 1)
-                correct += (val_pred == batch_y).sum().item()
-                total += batch_y.size(0)
-
-        val_acc = correct / total
-        val_loss = val_loss / total
-
-        return val_acc, val_loss
-
-    def evaluate(self, test_dataloader):
-        """测试模型"""
-        # load model for test
-        self.model = torch.load(self.model_filename, weights_only=False).to(device)
-        self.model.eval()
-
-        correct = 0
-        total = 0
+        test_loss = 0
+        y_true_list = []
         y_pred_list = []
         with torch.no_grad():
             for i, (img, label) in enumerate(test_dataloader):
@@ -389,16 +380,23 @@ class Experiment:
                 label_test = label.to(device)
 
                 # test model
-                features, outputs = self.model(img_test)
-                _, pred = torch.max(outputs, 1)
+                _, logits = model(img_test)
+                loss = criterion(logits, label_test)
+
+                test_loss += loss.item() * label_test.size(0)
+                _, pred = torch.max(logits, 1)
+                y_true_list.append(label_test)
                 y_pred_list.append(pred)
                 correct += (pred == label_test).sum().item()
                 total += label_test.size(0)
 
         test_acc = correct / total
-        y_pred = torch.cat(y_pred_list, dim=0)
+        test_loss = test_loss / total
 
-        return test_acc, y_pred
+        y_true_list = torch.cat(y_true_list, dim=0)
+        y_pred_list = torch.cat(y_pred_list, dim=0)
+
+        return test_acc, test_loss, y_true_list, y_pred_list
 
 
 def main(

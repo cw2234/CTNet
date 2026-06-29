@@ -540,7 +540,7 @@ if __name__ == "__main__":
     N_SEG = 8  # segmentation times for S&R
 
     MAIN_SEED = 42
-    EPOCHS = 100
+    EPOCHS = 1000
     EMB_DIM = 16
     HEADS = 2
     DEPTH = 6
